@@ -1,5 +1,14 @@
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
-use std::{fs::OpenOptions, io::Write};
+use std::{fs::OpenOptions, io::Write, io::copy, fs::File};
+use error_chain::error_chain;
+use tempfile::Builder;
+
+error_chain! {
+     foreign_links {
+         Io(std::io::Error);
+         HttpRequest(reqwest::Error);
+     }
+}
 
 macro_rules! input {
     ($prompt:expr) => {{
@@ -12,7 +21,8 @@ macro_rules! input {
     }};
 }
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<()> {
     let master_key = input!("Enter the key");
     loop {
         let mode =
@@ -22,15 +32,34 @@ fn main() {
         if mode == "q" {
             break;
         } else if mode == "1" {
-            show(&master_key);
+            let tmp_dir = Builder::new().prefix("data").tempdir()?;
+            let target = "https://d.zaix.ru/yGVA.txt";
+            let response = reqwest::get(target).await?;
+
+            let mut dest = {
+                let fname = response
+                    .url()
+                    .path_segments()
+                    .and_then(|segments| segments.last())
+                    .and_then(|name| if name.is_empty() { None } else { Some(name) })
+                    .unwrap_or("tmp.bin");
+
+                println!("file to download: '{}'", fname);
+                let fname = tmp_dir.path().join(fname);
+                println!("will be located under: '{:?}'", fname);
+                File::create(fname)?
+            };
+            let content =  response.text().await?;
+            copy(&mut content.as_bytes(), &mut dest)?;
+            show(&master_key, content);
         } else if mode == "2" {
             add(&master_key);
         } else {
             println!("Invalid command.Please try again.");
         }
     }
+    Ok(())
 }
-
 
 fn add(master_key: &str) {
     let account_name = input!("Account Name: ");
@@ -47,12 +76,8 @@ fn add(master_key: &str) {
         .expect("Failed to save data");
 }
 
-fn show(master_key: &str) {
-    if !std::path::Path::new("data.txt").exists() {
-        println!("You don't have any data yet! Press '2' to add new item ");
-        return;
-    }
-    let data = std::fs::read_to_string("data.txt").expect("Failed to load data");
+fn show(master_key: &str, content: String) {
+    let data = content;
     let magic_crypt = new_magic_crypt!(master_key, 256);
     for line in data.lines() {
         let (account_name, password) = line.split_once("|").expect("Invalid data was loaded");

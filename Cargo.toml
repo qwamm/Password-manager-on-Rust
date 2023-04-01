@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+error-chain = "0.12.4"
 magic-crypt = "3.1.12"
 reqwest = { version = "0.11", features = ["json"] }
+tempfile = "3.5.0"
 tokio = { version = "1", features = ["full"] }
