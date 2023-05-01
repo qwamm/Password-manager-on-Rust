@@ -10,4 +10,7 @@ error-chain = "0.12.4"
 magic-crypt = "3.1.12"
 reqwest = { version = "0.11", features = ["json"] }
 tempfile = "3.5.0"
+rand = "0.8.5"
+rsa = "0.9.0"
 tokio = { version = "1", features = ["full"] }
+sqlx = {version = "0.6.3", features = ["runtime-tokio-rustls", "postgres"]}
