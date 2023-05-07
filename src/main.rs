@@ -2,10 +2,13 @@
 use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use std::{fs::OpenOptions, io::Write, io::Error, string::String};
 use error_chain::error_chain;
-use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use rand;
 use sqlx::postgres::{PgPoolOptions, PgRow, PgConnectOptions};
 use sqlx::{FromRow, Row, ConnectOptions};
+use aes_gcm::{
+        aead::{Aead, KeyInit, OsRng},
+        Aes256Gcm, Nonce
+};
 
 #[derive(sqlx::FromRow)]
 #[derive(Debug)]
@@ -30,6 +33,7 @@ macro_rules! input {
 fn print_type_of<T>(_: &T) {
     println!("{}", std::any::type_name::<T>())
 }
+
 #[tokio::main]
 async fn main() -> Result<(), sqlx::Error> {
     let mut conn = PgConnectOptions::new()
@@ -39,17 +43,10 @@ async fn main() -> Result<(), sqlx::Error> {
         .password("api248")
         .connect().await?;
     let mut id = 0;
-    let mut rng = rand::thread_rng();
-    let bits = 2048;
-    let private_key = RsaPrivateKey::new(&mut rng, bits).expect("failed to generate a key");
-    let public_key = RsaPublicKey::from(&private_key);
-    // let file = OpenOptions::new()
-    //             .read(true)
-    //             .write(true)
-    //             .create(true)
-    //             .open("foo.txt");
-    // file?.write_all(private_key);
-    //let master_key = input!("Enter key: -->");
+    let key = Aes256Gcm::generate_key(&mut OsRng);
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = Nonce::from_slice(b"unique nonce");
+    let master_key = input!("Enter key: -->");
     loop {
         let mode =
             input!("Press '1' - to show list. Press '2' to add new item. Press 'q' to quit.")
@@ -91,25 +88,23 @@ async fn main() -> Result<(), sqlx::Error> {
                         v2.push(password_bytes[j]);
                     }
                 }
-                println!("{:?}",v1);
-                let dec_username = private_key.decrypt(Pkcs1v15Encrypt, &v1).expect("failed to decrypt");
-                let dec_password = private_key.decrypt(Pkcs1v15Encrypt, &v2).expect("failed to decrypt");
+
+                let dec_username = cipher.decrypt(nonce, v1.as_ref()).expect("Failed to decrypt");
+                let dec_password = cipher.decrypt(nonce, v2.as_ref()).expect("Failed to decrypt");
                 let str_1 = String::from_utf8(dec_username);
                 let str_2 = String::from_utf8(dec_password);
-                println!("username: {:?}", str_1);
-                println!("password: {:?}", str_2);
+                println!("{:?}", str_1);
+                println!("{:?}", str_2);
             }
+
         } else if mode == "2" {
             let account_name = input!("Account Name: ");
             let password = input!("Password: ");
             id += 1;
-            // let password_vec_bytes = password.into_bytes();
-            // let account_name_vec_bytes = account_name.into_bytes();
-            let password_to_bytes = password.as_bytes();
-            let account_name_to_bytes = account_name.as_bytes();
-            //let s = String::from_utf8(account_name).unwrap();
-             let enc_account_name = public_key.encrypt(&mut rng, Pkcs1v15Encrypt, &account_name_to_bytes[..]).expect("failed to encrypt");
-             let enc_password = public_key.encrypt(&mut rng, Pkcs1v15Encrypt, &password_to_bytes[..]).expect("failed to encrypt");
+            let password_to_bytes: &[u8] = password.as_bytes();
+            let account_name_to_bytes: &[u8] = account_name.as_bytes();
+            let enc_account_name = cipher.encrypt(nonce, account_name_to_bytes.as_ref()).expect("Failed to encrypt");
+            let enc_password = cipher.encrypt(nonce, password_to_bytes.as_ref()).expect("Failed to encrypt");
             sqlx::query(
             		r#"
             CREATE TABLE IF NOT EXISTS data (
@@ -133,6 +128,7 @@ async fn main() -> Result<(), sqlx::Error> {
                 let x_2 = i32::from(enc_account_name[i]);
                 v_2.push(x_2);
             }
+
             let row: (i32,) = sqlx::query_as("insert into data values ($1, $2, $3) returning id")
                 .bind(id)
                 .bind(v_2)
@@ -142,7 +138,8 @@ async fn main() -> Result<(), sqlx::Error> {
         } else {
             println!("Invalid command.Please try again.");
         }
-
     }
     Ok(())
 }
+
+// fn encrypt(cipher:Aes256Gcm, nonce:Nonce)
